@@ -1,7 +1,9 @@
 import numpy as np
 from matplotlib import pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
 
 
+# noinspection PyAttributeOutsideInit
 class StockTrading:
     def __init__(self, df, window, frame_bound):
         # Initialize the stock trading environment with the provided DataFrame,
@@ -22,6 +24,24 @@ class StockTrading:
 
         # Calculate the price difference ('diff') for each day and store it in the DataFrame
         self.df['diff'] = self.df['open'].diff()
+        self.df['prev_high'] = self.df['high'].shift(1)
+        self.df['prev_close'] = self.df['close'].shift(1)
+        self.df['prev_low'] = self.df['low'].shift(1)
+        self.df['SMA_5'] = self.df['close'].rolling(window=5).mean().shift(1)
+
+        # Exponential Moving Average (EMA) for last 5 days
+        self.df['EMA_5'] = self.df['close'].ewm(span=5, adjust=False).mean().shift(1)
+
+        # Relative Strength Index (RSI)
+        delta = self.df['close'].diff()
+        up = delta.clip(lower=0)
+        down = -1 * delta.clip(upper=0)
+        ema_up = up.ewm(com=13, adjust=False).mean()
+        ema_down = down.ewm(com=13, adjust=False).mean()
+        rs = ema_up / ema_down
+        self.df['RSI'] = 100 - (100 / (1 + rs))
+
+        self.df.fillna(0, inplace=True)
         assert self.begin > window, "Please start the frame_bound from a position greater than window_size"
 
     def get_observation_table(self):
@@ -29,8 +49,13 @@ class StockTrading:
 
         start_idx = self.current_tick - self.window_size + 1
         end_idx = self.current_tick
-        observation_table = self.df.loc[start_idx:end_idx, ['open', 'diff']].values
-        return observation_table
+        observation_table = self.df.loc[start_idx:end_idx, ['open', 'diff', 'prev_close', 'prev_low', 'prev_high', 'SMA_5', 'EMA_5', 'RSI']].values
+        # Create a scaler object
+        scaler = MinMaxScaler()
+
+        # Fit and transform the data
+        observation_table_normalized = scaler.fit_transform(observation_table)
+        return observation_table_normalized
 
     def reset(self, cash, long, short):
         # Reset the environment to the initial state with the provided initial cash,
@@ -42,8 +67,7 @@ class StockTrading:
         self.cash = cash
         self.long_holding = long
         self.short_holding = short
-        self.initial_net_val = self.cash + self.long_holding * self.df.iloc[self.current_tick - 1][
-            'open'] - self.short_holding * self.df.iloc[self.current_tick - 1]['open']
+        self.initial_net_val = self.cash + self.long_holding * self.df.iloc[self.current_tick - 1]['open'] - self.short_holding * self.df.iloc[self.current_tick - 1]['open']
         self.curr_net_val = self.initial_net_val
         self.risk = []
         self.profit = []
@@ -77,17 +101,17 @@ class StockTrading:
 
         if action[0] > 0:
             # Buy long position
-            self.cash += (self.long_holding) * open_today * action[0]
+            self.cash += self.long_holding * open_today * action[0]
             self.long_holding *= (1 - action[0])
         else:
             # Sell long position
             self.long_holding += (self.cash * (-action[0]) / open_today)
             self.cash += self.cash * action[0]
-            risk += (self.cash * (-action[0]) / open_today) * (open_today) * 0.05
+            risk += (self.cash * (-action[0]) / open_today) * open_today * 0.05
 
         if action[1] > 0:
             # Buy short position
-            self.cash += (self.short_holding) * open_today * action[1]
+            self.cash += self.short_holding * open_today * action[1]
             self.short_holding *= (1 - action[1])
         else:
             # Sell short position

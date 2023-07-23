@@ -3,57 +3,9 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import torch.optim as optim
-from collections import deque
-import random
 import copy
-
-
-# from torch.distributions import Normal
-
-class ReplayBuffer:
-    def __init__(self, max_size):
-        self.buffer = deque(maxlen=max_size)
-
-    def push(self, state, action, reward, next_state, done):
-        experience = (state, action, reward, next_state, done)
-        self.buffer.append(experience)
-
-    def sample(self, batch_size):
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch = zip(
-            *random.sample(self.buffer, batch_size))
-        reward_batch = np.array(reward_batch)
-        done_batch = np.array(done_batch)
-        return state_batch, action_batch, reward_batch, next_state_batch, done_batch
-
-    def __len__(self):
-        return len(self.buffer)
-
-
-class OUNoise:
-    def __init__(self, action_dimension, sigma=0.099, scale=0.01, mu=0, theta=0.15, decay_rate=0.999999):
-        self.action_dimension = action_dimension
-        self.scale = scale
-        self.mu = mu
-        self.theta = theta
-        self.sigma = sigma
-        self.decay_rate = decay_rate
-        self.state = np.ones(self.action_dimension) * self.mu
-        self.reset()
-
-    def reset(self):
-        self.state = np.ones(self.action_dimension) * self.mu
-        self.sigma *= self.decay_rate
-
-    def decay(self):
-        # decay the sigma value
-        self.sigma *= self.decay_rate
-
-    def noise(self):
-        x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
-        self.state = x + dx
-        self.decay()
-        return np.array([self.state * self.scale], dtype='float').reshape(1, -1)
+from Replay_Buffer import ReplayBuffer
+from Noise_Class import OUNoise
 
 
 class Actor(nn.Module):
@@ -61,8 +13,8 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
 
         self.fc1 = nn.Linear(input_dim, 200)
-        self.fc2 = nn.Linear(200, 50)
-        self.fc3 = nn.Linear(50, output_dim)
+        self.fc2 = nn.Linear(200, 300)
+        self.fc3 = nn.Linear(300, output_dim)
 
     def forward(self, state):
         x = F.relu(self.fc1(state))
@@ -76,8 +28,8 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         self.fc1 = nn.Linear(input_dim + output_dim, 200)
-        self.fc2 = nn.Linear(200, 50)
-        self.fc3 = nn.Linear(50, 1)
+        self.fc2 = nn.Linear(200, 300)
+        self.fc3 = nn.Linear(300, 1)
 
     def forward(self, state, action):
         state = torch.FloatTensor(state) if isinstance(state, np.ndarray) else state
@@ -89,7 +41,6 @@ class Critic(nn.Module):
 
 
 def check_action(action):
-
     if action[0, 0] > 1:
         action[0, 0] = 1
     elif action[0, 0] < -1:
@@ -103,7 +54,7 @@ def check_action(action):
 
 
 class DDPGAgent:
-    def __init__(self, env, actor, critic, actor_lr, critic_lr, gamma, tau, buffer_maxlen,sigma=0.099):
+    def __init__(self, env, actor, critic, actor_lr, critic_lr, gamma, tau, buffer_maxlen, sigma=0.099):
         self.env = env
         self.actor = actor
         self.critic = critic
@@ -113,7 +64,7 @@ class DDPGAgent:
         self.critic_optimizer = optim.Adam(critic.parameters(), lr=critic_lr)
         self.gamma = gamma
         self.tau = tau
-        self.noise = OUNoise(2,sigma)
+        self.noise = OUNoise(2, sigma)
         self.replay_buffer = ReplayBuffer(max_size=buffer_maxlen)
 
     def save(self, filename):
@@ -142,10 +93,10 @@ class DDPGAgent:
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
         states = np.array(states)
         states = torch.FloatTensor(states.reshape(batch_size, -1))  # Flattening the states
-        # actions = torch.FloatTensor(actions).view(-1, 1)
-        # rewards = torch.FloatTensor(rewards).view(-1, 1)
         next_states = np.array(next_states)
-        actions = torch.FloatTensor(actions)
+        actions = np.array(actions)  # convert list of ndarrays to a single ndarray
+        actions = torch.FloatTensor(actions)  # convert ndarray to tensor
+
         next_states = torch.FloatTensor(next_states.reshape(batch_size, -1))  # Flattening the next_states
         dones = torch.FloatTensor(dones).view(-1, 1)
 
@@ -154,15 +105,6 @@ class DDPGAgent:
         next_q_values = self.target_critic(next_states, next_actions)
         rewards = torch.Tensor(rewards).view(-1, 1)
 
-        # for debugging only
-        # print(type(states),type(rewards), type(dones), type(self.gamma), type(next_q_values))
-        # print(rewards.shape, dones.shape, next_q_values.shape,states.shape)
-
-        # print("State shape: ", states.shape)
-        # print("Action shape: ", actions.shape)
-        # print(f"q_val shape: {q_values.shape}")
-        # print(f"target_q_val shape: {target_q_values.shape}")
-        # ends here
         target_q_values = torch.FloatTensor(rewards) + (1 - torch.Tensor(dones)) * self.gamma * next_q_values
 
         q_values = self.critic(states, actions)
