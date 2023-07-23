@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import random
 import torch.nn.functional as F
 import torch.optim as optim
 import copy
@@ -40,21 +41,8 @@ class Critic(nn.Module):
         return q_value
 
 
-def check_action(action):
-    if action[0, 0] > 1:
-        action[0, 0] = 1
-    elif action[0, 0] < -1:
-        action[0, 0] = -1
-
-    if action[0, 1] > 1:
-        action[0, 1] = 1
-    elif action[0, 1] < -1:
-        action[0, 1] = -1
-    return action
-
-
 class DDPGAgent:
-    def __init__(self, env, actor, critic, actor_lr, critic_lr, gamma, tau, buffer_maxlen, sigma=0.099):
+    def __init__(self, env, actor, critic, actor_lr, critic_lr, gamma, tau, buffer_maxlen, sigma=0.2, epsilon=1):
         self.env = env
         self.actor = actor
         self.critic = critic
@@ -66,6 +54,10 @@ class DDPGAgent:
         self.tau = tau
         self.noise = OUNoise(2, sigma)
         self.replay_buffer = ReplayBuffer(max_size=buffer_maxlen)
+        self.epsilon = epsilon
+
+    def decay(self):
+        self.epsilon *= 0.999
 
     def save(self, filename):
         torch.save(self.actor.state_dict(), filename + "_actor")
@@ -84,8 +76,9 @@ class DDPGAgent:
         action = self.actor(state)
         action = action.detach().numpy()[0]
         noise = self.noise.noise()
-        action = action + noise
-        action = check_action(action)
+        if random.random() < self.epsilon:
+            self.decay()
+            return noise
         action = action.reshape(-1)
         return action
 

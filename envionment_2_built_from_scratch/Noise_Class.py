@@ -24,4 +24,4 @@ class OUNoise:
         dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
         self.state = x + dx
         # self.decay()
-        return np.clip(self.state * self.scale, -0.1, 0.1).reshape(1, -1)
+        return np.clip(self.state * self.scale, -1.0, 1.0).reshape(1, -1)
